@@ -249,7 +249,7 @@ Servers ask clients to run LLM tasks on their behalf (server doesn't need own AI
 **Remember**: These are **server-to-client requests** - servers ask clients for help, and clients maintain user control.
 
 ---
-# Local test
+# Local test MCP server + claude Desktop
 
 + code $env:AppData\Claude\claude_desktop_config.json   
 
@@ -278,3 +278,6 @@ Servers ask clients to run LLM tasks on their behalf (server doesn't need own AI
   }
 }
 ```
+
+# Local test MCP server + MCP client (local chat test)
+`python client.py F:\my-code\MCP-TEST\weather-mcp-server\weather.py`
