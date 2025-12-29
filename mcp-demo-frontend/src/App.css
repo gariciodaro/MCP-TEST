@@ -395,3 +395,121 @@
   align-self: flex-end;
   padding: 12px 24px;
 }
+
+/* Resource Card Clickable */
+.resource-card.clickable {
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.resource-card.clickable:hover {
+  border-color: var(--accent-purple);
+  background: rgba(163, 113, 247, 0.1);
+  transform: translateY(-1px);
+}
+
+.resources-hint {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+  font-style: italic;
+}
+
+.resource-action {
+  margin-top: 8px;
+  font-size: 0.75rem;
+  color: var(--accent-purple);
+  opacity: 0.7;
+}
+
+.resource-card.clickable:hover .resource-action {
+  opacity: 1;
+}
+
+/* Modal */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+}
+
+.modal {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  width: 100%;
+  max-width: 700px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.modal-header h2 {
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 1.25rem;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.modal-close:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.modal-uri {
+  padding: 12px 20px;
+  background: var(--bg-tertiary);
+  font-family: monospace;
+  font-size: 0.85rem;
+  color: var(--accent-purple);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.modal-content {
+  padding: 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.modal-content pre {
+  background: var(--code-bg);
+  padding: 16px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.loading-resource {
+  color: var(--text-secondary);
+  text-align: center;
+  padding: 40px;
+}

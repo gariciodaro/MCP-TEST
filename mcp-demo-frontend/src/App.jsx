@@ -13,6 +13,9 @@ function App() {
   const [inputMessage, setInputMessage] = useState('')
   const [loading, setLoading] = useState(false)
   const [activeTab, setActiveTab] = useState('chat')
+  const [selectedResource, setSelectedResource] = useState(null)
+  const [resourceContent, setResourceContent] = useState(null)
+  const [loadingResource, setLoadingResource] = useState(false)
   const messagesEndRef = useRef(null)
 
   const scrollToBottom = () => {
@@ -127,6 +130,32 @@ function App() {
     }
   }
 
+  const readResource = async (uri) => {
+    setLoadingResource(true)
+    setSelectedResource(uri)
+    try {
+      const res = await fetch(`${API_BASE}/resources/read`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uri })
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setResourceContent(data.content || data.error)
+      } else {
+        setResourceContent(`Error: ${data.detail}`)
+      }
+    } catch (err) {
+      setResourceContent(`Error: ${err.message}`)
+    }
+    setLoadingResource(false)
+  }
+
+  const closeResourceModal = () => {
+    setSelectedResource(null)
+    setResourceContent(null)
+  }
+
   return (
     <div className="app">
       {/* Header */}
@@ -221,14 +250,20 @@ function App() {
             {activeTab === 'resources' && (
               <div className="resources-list">
                 <h3>Available Resources</h3>
+                <p className="resources-hint">Click a resource to read its content</p>
                 {resources.length === 0 ? (
                   <p className="empty-state">No resources available.</p>
                 ) : (
                   resources.map((res, idx) => (
-                    <div key={idx} className="resource-card">
+                    <div 
+                      key={idx} 
+                      className="resource-card clickable"
+                      onClick={() => readResource(res.uri)}
+                    >
                       <div className="resource-uri">{res.uri}</div>
                       <div className="resource-name">{res.name}</div>
                       {res.description && <div className="resource-description">{res.description}</div>}
+                      <div className="resource-action">📖 Click to read</div>
                     </div>
                   ))
                 )}
@@ -347,6 +382,26 @@ function App() {
           </div>
         </main>
       </div>
+
+      {/* Resource Modal */}
+      {selectedResource && (
+        <div className="modal-overlay" onClick={closeResourceModal}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>📦 Resource Content</h2>
+              <button className="modal-close" onClick={closeResourceModal}>✕</button>
+            </div>
+            <div className="modal-uri">{selectedResource}</div>
+            <div className="modal-content">
+              {loadingResource ? (
+                <div className="loading-resource">Loading resource...</div>
+              ) : (
+                <pre>{resourceContent}</pre>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
