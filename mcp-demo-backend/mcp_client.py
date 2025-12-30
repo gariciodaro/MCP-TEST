@@ -166,61 +166,71 @@ class MCPClient:
         # Initial Claude API call
         response = self.anthropic.messages.create(
             model="claude-sonnet-4-20250514",
-            max_tokens=1000,
+            max_tokens=4096,
             messages=messages,
             tools=available_tools
         )
 
-        # Process response and handle tool calls
+        # Process response and handle tool calls in a loop
         final_text = []
-        assistant_message_content = []
+        
+        while response.stop_reason == "tool_use":
+            # Collect all tool uses from this response
+            assistant_content = []
+            tool_results = []
+            
+            for content in response.content:
+                assistant_content.append(content)
+                
+                if content.type == 'text':
+                    final_text.append(content.text)
+                elif content.type == 'tool_use':
+                    tool_name = content.name
+                    tool_args = content.input
 
+                    # Execute tool call
+                    result = await self.session.call_tool(tool_name, tool_args)
+                    result_text = result.content[0].text if result.content else ""
+                    
+                    # Record the tool call
+                    tool_call = ToolCall(
+                        name=tool_name,
+                        arguments=tool_args,
+                        result=result_text
+                    )
+                    tool_calls_made.append(tool_call)
+                    
+                    # Prepare tool result
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": content.id,
+                        "content": result_text
+                    })
+            
+            # Add assistant message with all tool uses
+            messages.append({
+                "role": "assistant",
+                "content": assistant_content
+            })
+            
+            # Add all tool results in a single user message
+            messages.append({
+                "role": "user",
+                "content": tool_results
+            })
+
+            # Get next response from Claude
+            response = self.anthropic.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=4096,
+                messages=messages,
+                tools=available_tools
+            )
+        
+        # Process final response (no more tool calls)
         for content in response.content:
             if content.type == 'text':
                 final_text.append(content.text)
-                assistant_message_content.append(content)
-            elif content.type == 'tool_use':
-                tool_name = content.name
-                tool_args = content.input
-
-                # Execute tool call
-                result = await self.session.call_tool(tool_name, tool_args)
-                
-                # Record the tool call
-                tool_call = ToolCall(
-                    name=tool_name,
-                    arguments=tool_args,
-                    result=result.content[0].text if result.content else ""
-                )
-                tool_calls_made.append(tool_call)
-
-                # Continue conversation with tool result
-                assistant_message_content.append(content)
-                messages.append({
-                    "role": "assistant",
-                    "content": assistant_message_content
-                })
-                messages.append({
-                    "role": "user",
-                    "content": [{
-                        "type": "tool_result",
-                        "tool_use_id": content.id,
-                        "content": result.content
-                    }]
-                })
-
-                # Get next response from Claude
-                response = self.anthropic.messages.create(
-                    model="claude-sonnet-4-20250514",
-                    max_tokens=1000,
-                    messages=messages,
-                    tools=available_tools
-                )
-
-                # Get final text response
-                for final_content in response.content:
-                    if final_content.type == 'text':
-                        final_text.append(final_content.text)
 
         return MCPMessage(
             role="assistant",
