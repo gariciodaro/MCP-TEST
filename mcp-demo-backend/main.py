@@ -83,6 +83,11 @@ class ResourceReadRequest(BaseModel):
     uri: str
 
 
+class PromptGetRequest(BaseModel):
+    name: str
+    arguments: Dict[str, str] = {}
+
+
 # API Endpoints
 @app.get("/")
 async def root():
@@ -216,6 +221,18 @@ async def get_prompts():
     
     prompts = await mcp_client.get_prompts()
     return {"prompts": prompts}
+
+
+@app.post("/prompts/get")
+async def get_prompt(request: PromptGetRequest):
+    """Get a specific prompt with arguments filled in"""
+    if not mcp_client or not mcp_client.connected:
+        raise HTTPException(status_code=400, detail="Not connected to MCP server")
+    
+    result = await mcp_client.get_prompt(request.name, request.arguments)
+    if "error" in result:
+        raise HTTPException(status_code=500, detail=result["error"])
+    return result
 
 
 if __name__ == "__main__":

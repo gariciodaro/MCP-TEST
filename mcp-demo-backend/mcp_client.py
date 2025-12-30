@@ -121,6 +121,37 @@ class MCPClient:
         except Exception as e:
             return {"error": str(e)}
 
+    async def get_prompt(self, name: str, arguments: Dict[str, str] = None) -> Dict:
+        """Get a prompt with its messages"""
+        if not self.session:
+            return {"error": "Not connected"}
+        try:
+            response = await self.session.get_prompt(name, arguments=arguments or {})
+            # Convert prompt messages to a usable format
+            messages = []
+            for msg in response.messages:
+                content = msg.content
+                # Handle TextContent vs string
+                if hasattr(content, 'text'):
+                    content = content.text
+                elif isinstance(content, list):
+                    # Handle list of content blocks
+                    content = ' '.join(
+                        c.text if hasattr(c, 'text') else str(c) 
+                        for c in content
+                    )
+                messages.append({
+                    "role": msg.role,
+                    "content": str(content)
+                })
+            return {
+                "name": name,
+                "description": getattr(response, 'description', ''),
+                "messages": messages
+            }
+        except Exception as e:
+            return {"error": str(e)}
+
     async def process_query(self, query: str) -> MCPMessage:
         """Process a query using Claude and available tools"""
         if not self.session:

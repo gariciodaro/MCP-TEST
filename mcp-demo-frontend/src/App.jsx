@@ -16,6 +16,10 @@ function App() {
   const [selectedResource, setSelectedResource] = useState(null)
   const [resourceContent, setResourceContent] = useState(null)
   const [loadingResource, setLoadingResource] = useState(false)
+  const [selectedPrompt, setSelectedPrompt] = useState(null)
+  const [promptArgs, setPromptArgs] = useState({})
+  const [loadingPrompt, setLoadingPrompt] = useState(false)
+  const [promptPreview, setPromptPreview] = useState(null)
   const messagesEndRef = useRef(null)
 
   const scrollToBottom = () => {
@@ -156,6 +160,96 @@ function App() {
     setResourceContent(null)
   }
 
+  const selectPrompt = (prompt) => {
+    setSelectedPrompt(prompt)
+    // Initialize arguments with empty strings
+    const args = {}
+    if (prompt.arguments) {
+      prompt.arguments.forEach(arg => {
+        args[arg.name] = ''
+      })
+    }
+    setPromptArgs(args)
+  }
+
+  const closePromptModal = () => {
+    setSelectedPrompt(null)
+    setPromptArgs({})
+    setPromptPreview(null)
+  }
+
+  const updatePromptArg = (name, value) => {
+    setPromptArgs(prev => ({ ...prev, [name]: value }))
+    setPromptPreview(null) // Clear preview when args change
+  }
+
+  const previewPrompt = async () => {
+    if (!selectedPrompt) return
+    
+    setLoadingPrompt(true)
+    try {
+      const res = await fetch(`${API_BASE}/prompts/get`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          name: selectedPrompt.name, 
+          arguments: promptArgs 
+        })
+      })
+      const data = await res.json()
+      
+      if (res.ok && data.messages && data.messages.length > 0) {
+        const userMsg = data.messages.find(m => m.role === 'user')
+        if (userMsg) {
+          setPromptPreview(userMsg.content)
+        }
+      } else {
+        alert(`Failed to get prompt: ${data.detail || 'Unknown error'}`)
+      }
+    } catch (err) {
+      alert(`Error: ${err.message}`)
+    }
+    setLoadingPrompt(false)
+  }
+
+  const usePrompt = async () => {
+    if (promptPreview) {
+      // Use existing preview
+      setInputMessage(promptPreview)
+      setActiveTab('chat')
+      closePromptModal()
+      return
+    }
+    
+    // No preview yet, fetch and use directly
+    setLoadingPrompt(true)
+    try {
+      const res = await fetch(`${API_BASE}/prompts/get`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          name: selectedPrompt.name, 
+          arguments: promptArgs 
+        })
+      })
+      const data = await res.json()
+      
+      if (res.ok && data.messages && data.messages.length > 0) {
+        const userMsg = data.messages.find(m => m.role === 'user')
+        if (userMsg) {
+          setInputMessage(userMsg.content)
+          setActiveTab('chat')
+          closePromptModal()
+        }
+      } else {
+        alert(`Failed to get prompt: ${data.detail || 'Unknown error'}`)
+      }
+    } catch (err) {
+      alert(`Error: ${err.message}`)
+    }
+    setLoadingPrompt(false)
+  }
+
   return (
     <div className="app">
       {/* Header */}
@@ -273,13 +367,24 @@ function App() {
             {activeTab === 'prompts' && (
               <div className="prompts-list">
                 <h3>Available Prompts</h3>
+                <p className="prompts-hint">Click a prompt to use it</p>
                 {prompts.length === 0 ? (
                   <p className="empty-state">No prompts available.</p>
                 ) : (
                   prompts.map((prompt, idx) => (
-                    <div key={idx} className="prompt-card">
+                    <div 
+                      key={idx} 
+                      className="prompt-card clickable"
+                      onClick={() => selectPrompt(prompt)}
+                    >
                       <div className="prompt-name">{prompt.name}</div>
                       {prompt.description && <div className="prompt-description">{prompt.description}</div>}
+                      {prompt.arguments && prompt.arguments.length > 0 && (
+                        <div className="prompt-args-preview">
+                          <strong>Arguments:</strong> {prompt.arguments.map(a => a.name).join(', ')}
+                        </div>
+                      )}
+                      <div className="prompt-action">📝 Click to use</div>
                     </div>
                   ))
                 )}
@@ -398,6 +503,78 @@ function App() {
               ) : (
                 <pre>{resourceContent}</pre>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Prompt Modal */}
+      {selectedPrompt && (
+        <div className="modal-overlay" onClick={closePromptModal}>
+          <div className="modal prompt-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>📝 Use Prompt</h2>
+              <button className="modal-close" onClick={closePromptModal}>✕</button>
+            </div>
+            <div className="prompt-modal-name">{selectedPrompt.name}</div>
+            {selectedPrompt.description && (
+              <div className="prompt-modal-description">{selectedPrompt.description}</div>
+            )}
+            
+            {selectedPrompt.arguments && selectedPrompt.arguments.length > 0 ? (
+              <div className="prompt-args-form">
+                <h4>Fill in the arguments:</h4>
+                {selectedPrompt.arguments.map((arg, idx) => (
+                  <div key={idx} className="prompt-arg-field">
+                    <label htmlFor={`arg-${arg.name}`}>
+                      {arg.name}
+                      {arg.required && <span className="required">*</span>}
+                    </label>
+                    {arg.description && (
+                      <span className="arg-description">{arg.description}</span>
+                    )}
+                    <input
+                      id={`arg-${arg.name}`}
+                      type="text"
+                      value={promptArgs[arg.name] || ''}
+                      onChange={(e) => updatePromptArg(arg.name, e.target.value)}
+                      placeholder={`Enter ${arg.name}...`}
+                    />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="no-args-message">This prompt has no arguments.</p>
+            )}
+
+            {promptPreview && (
+              <div className="prompt-preview">
+                <h4>Preview:</h4>
+                <pre>{promptPreview}</pre>
+              </div>
+            )}
+            
+            <div className="prompt-modal-actions">
+              <button 
+                className="btn btn-secondary" 
+                onClick={closePromptModal}
+              >
+                Cancel
+              </button>
+              <button 
+                className="btn btn-outline" 
+                onClick={previewPrompt}
+                disabled={loadingPrompt}
+              >
+                {loadingPrompt ? 'Loading...' : '👁️ Preview'}
+              </button>
+              <button 
+                className="btn btn-primary" 
+                onClick={usePrompt}
+                disabled={loadingPrompt}
+              >
+                {promptPreview ? 'Use Prompt' : 'Use Prompt'}
+              </button>
             </div>
           </div>
         </div>

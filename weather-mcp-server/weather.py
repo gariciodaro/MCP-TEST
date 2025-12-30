@@ -246,6 +246,120 @@ Forecast: {period["detailedForecast"]}
     return "\n---\n".join(forecasts)
 
 
+# ============== PROMPTS ==============
+# Prompts are structured templates that guide user interactions
+
+@mcp.prompt()
+def check_city_weather(city: str) -> str:
+    """Get a weather forecast for a major US city.
+    
+    Args:
+        city: Name of a major US city (e.g., New York, Los Angeles, Chicago)
+    """
+    city_data = EXAMPLE_CITIES.get(city)
+    if city_data:
+        return f"""Please get the weather forecast for {city}.
+        
+Use the get_forecast tool with these coordinates:
+- Latitude: {city_data['lat']}
+- Longitude: {city_data['lon']}
+
+After getting the forecast, provide a friendly summary of:
+1. Current conditions
+2. Temperature trends
+3. Any notable weather to be aware of"""
+    else:
+        available = ", ".join(EXAMPLE_CITIES.keys())
+        return f"""The city "{city}" is not in our quick-reference list.
+
+Available cities with pre-loaded coordinates: {available}
+
+Please either:
+1. Choose one of the available cities above
+2. Or provide specific latitude/longitude coordinates for {city}"""
+
+
+@mcp.prompt()
+def check_state_alerts(state: str) -> str:
+    """Check weather alerts for a US state.
+    
+    Args:
+        state: Two-letter US state code (e.g., CA, NY, TX)
+    """
+    state_upper = state.upper()
+    state_name = US_STATES.get(state_upper, state_upper)
+    
+    return f"""Please check for any active weather alerts in {state_name} ({state_upper}).
+
+Use the get_alerts tool with state code: {state_upper}
+
+After getting the alerts:
+1. If there are alerts, summarize each one with severity level
+2. If no alerts, confirm the state is clear
+3. Provide any safety recommendations if severe weather is present"""
+
+
+@mcp.prompt()
+def travel_weather_check(origin_city: str, destination_city: str) -> str:
+    """Check weather for a trip between two cities.
+    
+    Args:
+        origin_city: Starting city name
+        destination_city: Destination city name
+    """
+    origin_data = EXAMPLE_CITIES.get(origin_city)
+    dest_data = EXAMPLE_CITIES.get(destination_city)
+    
+    prompt_parts = [f"I'm planning a trip from {origin_city} to {destination_city}. Please help me check the weather for both locations.\n"]
+    
+    if origin_data:
+        prompt_parts.append(f"Origin ({origin_city}): lat={origin_data['lat']}, lon={origin_data['lon']}, state={origin_data['state']}")
+    else:
+        prompt_parts.append(f"Origin ({origin_city}): coordinates not pre-loaded, may need to look up")
+    
+    if dest_data:
+        prompt_parts.append(f"Destination ({destination_city}): lat={dest_data['lat']}, lon={dest_data['lon']}, state={dest_data['state']}")
+    else:
+        prompt_parts.append(f"Destination ({destination_city}): coordinates not pre-loaded, may need to look up")
+    
+    prompt_parts.append("""
+Please:
+1. Get the forecast for both cities (use get_forecast for each)
+2. Check for weather alerts in both states (use get_alerts)
+3. Compare the weather conditions
+4. Provide travel recommendations based on the weather""")
+    
+    return "\n".join(prompt_parts)
+
+
+@mcp.prompt()
+def weekly_planning(city: str) -> str:
+    """Get a detailed weather summary for weekly planning.
+    
+    Args:
+        city: City name for the weather forecast
+    """
+    city_data = EXAMPLE_CITIES.get(city)
+    
+    if city_data:
+        return f"""I need to plan my week in {city}. Please provide a comprehensive weather overview.
+
+Use get_forecast with coordinates: lat={city_data['lat']}, lon={city_data['lon']}
+Also check get_alerts for state: {city_data['state']}
+
+Please provide:
+1. Day-by-day breakdown of expected weather
+2. Best days for outdoor activities
+3. Any days to avoid being outside
+4. Clothing/preparation recommendations
+5. Any active weather alerts to be aware of"""
+    else:
+        available = ", ".join(EXAMPLE_CITIES.keys())
+        return f"""City "{city}" not found in quick-reference. Available: {available}
+
+Please either select an available city or provide coordinates for {city}."""
+
+
 def main():
     # Initialize and run the server
     mcp.run(transport="stdio")
