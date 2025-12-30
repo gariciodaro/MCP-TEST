@@ -1,105 +1,6 @@
 # MCP Protocol Notes
 
-## Resources vs Tools: Noun vs Verb Analogy
-
-### Resources (Nouns)
-- Represent **data entities** that exist
-- Like a book on a library shelf
-- Can be read/observed without changing them
-- Examples: calendar data, documents, user profiles
-- URI-addressable: `resource://calendar/today`
-
-### Tools (Verbs)
-- Represent **operations/actions** to perform
-- Like checking out or returning a book
-- Execute functions, may modify data
-- Examples: create_event, delete_event, update_meeting
-
-### Key Principle
-**Resources = entities with data** (read-focused)  
-**Tools = operations/actions** (write/modify-focused)
-
----
-
-## User Interaction Model for Resources
-
-### Core Concept: Application-Driven Design
-The MCP protocol **doesn't dictate UI** - it only defines how servers expose resources. Each client application decides how to present them to users.
-
-### Common Interaction Patterns
-
-#### 1. Tree or List Views
-Resources displayed in hierarchical structures, like file explorers:
-```
-📁 Database Resources
-  └─ 📊 users_table
-  └─ 📊 orders_table
-📁 API Resources  
-  └─ 🌐 current_weather
-  └─ 🌐 forecast
-```
-**Use case**: Natural parent-child relationships (folders, databases, categories)
-
-#### 2. Search and Filter Interfaces
-Users type to find specific resources:
-```
-Search: "customer data"
-Results:
-  ✓ database://customers
-  ✓ api://customer_analytics  
-```
-**Use case**: Large number of resources where browsing is inefficient
-
-#### 3. Automatic Context Inclusion
-The application **intelligently decides** which resources to include without user action.
-
-**Example**: 
-- User asks "What's in my calendar?"
-- App automatically fetches `resource://calendar/today`
-- User never manually selected it
-
-**Driven by**:
-- Heuristics: Keywords in conversation trigger resource inclusion
-- AI selection: LLM decides which resources are relevant
-
-#### 4. Manual Selection
-User explicitly chooses resources:
-```
-☐ Include database schema
-☑ Include API documentation  
-☐ Include error logs
-```
-**Use case**: Precise control over context
-
-#### 5. Bulk Selection
-Select multiple resources at once:
-```
-Select all: "*.log"
-✓ app.log
-✓ error.log  
-[Add to Context]
-```
-
-### Why This Flexibility Matters
-
-**Different Contexts Need Different UIs**:
-- Code editor: Tree view matches file explorer mental model
-- Chat app: Search/suggestions fit conversational flow
-- Dashboard: Bulk selection for data analysis
-
-**Protocol's Role**: Provides resource discovery (`resources/list`), reading (`resources/read`), and metadata. The **application** builds the UI.
-
-### Summary
-- MCP servers expose resources (the "what")
-- Client applications decide presentation (the "how")
-- No mandatory UI patterns
-- Protocol is **UI-agnostic** by design
-
----
-
-## Prompts: Structured Templates vs Natural Language
-
-### MCP Architecture (3 Actors)
+## MCP Architecture Overview
 ```
 ┌─────────────────────────────────────┐
 │   AI Application (e.g., Claude)    │
@@ -115,118 +16,148 @@ Select all: "*.log"
 └─────────────────────────────────────┘
 ```
 
-### Two Interaction Patterns
+---
 
-#### Pattern 1: Natural Language (Free-Form)
+# MCP Server
+
+## Definition
+An **MCP Server** is a program that exposes capabilities (data and functionality) to AI applications through the MCP protocol. Servers provide context and tools that LLMs can use to accomplish tasks.
+
+**You build servers** to connect your data, APIs, and services to AI applications.
+
+---
+
+## Core Server Features
+
+### 1. Tools (Verbs) 🔧
+**Actions the LLM can execute** - functions that do something.
+
+- Represent **operations/actions** to perform
+- Like checking out or returning a book from a library
+- Execute functions, may modify data or have side effects
+- Examples: `create_event`, `send_email`, `query_database`
+
+```python
+@mcp.tool()
+async def get_forecast(latitude: float, longitude: float) -> str:
+    """Get weather forecast for a location."""
+    # ... fetch and return weather data
 ```
-User types freely → LLM interprets → Makes MCP calls
 
-Example:
-User: "What's my calendar for today?"
-→ LLM calls: resources/read(uri="calendar://today")
+---
+
+### 2. Resources (Nouns) 📦
+**Data the LLM can read** - information that exists.
+
+- Represent **data entities** that exist
+- Like a book on a library shelf
+- Can be read/observed without changing them
+- URI-addressable: `resource://calendar/today`
+- Examples: calendar data, documents, user profiles
+
+```python
+@mcp.resource("weather://supported-states")
+def get_supported_states() -> str:
+    """List of all supported US state codes."""
+    return "CA, NY, TX, ..."
 ```
 
-**Characteristics**:
-- Flexible, conversational
-- LLM must interpret intent
-- Varies by user phrasing
-- Good for ad-hoc questions
+---
 
-#### Pattern 2: Prompt Templates (Structured)
+### 3. Prompts (Templates) 📝
+**Structured conversation starters** - pre-defined workflows.
+
+- **Optional** - not required for a functional server
+- UI scaffolding + input structuring for the LLM
+- Ensure consistent, validated user input
+- Good for repetitive tasks and onboarding new users
+
+```python
+@mcp.prompt()
+def plan_vacation(destination: str, days: int) -> str:
+    """Guide through vacation planning."""
+    return f"Plan a {days}-day trip to {destination}..."
 ```
-User selects prompt → Fills form → Structured input → LLM processes → Makes MCP calls
 
-Example:
-User: Selects "/plan-vacation"
-Form: Destination [Barcelona], Duration [7], Budget [3000]
-→ LLM receives well-structured context
-```
+---
 
-**Characteristics**:
-- Consistent data structure
-- Required fields enforced
-- Type validation
-- Better for repetitive workflows
+### Key Principle: Nouns vs Verbs
 
-### Key Insight: Prompts Help the LLM, Don't Replace It
+| Aspect | Resources (Nouns) | Tools (Verbs) |
+|--------|-------------------|---------------|
+| **Purpose** | Data to read | Actions to perform |
+| **Analogy** | Book on shelf | Checking out a book |
+| **Side Effects** | None (read-only) | May modify data |
+| **Examples** | `weather://alerts` | `send_email()` |
 
-**Prompts are NOT pre-programmed scripts** - they're **UI scaffolding + input structuring**.
+---
 
-The LLM still:
-- Decides which MCP tools/resources to call
-- Processes the request
-- Generates responses
-
-Prompts just provide **better structured context**.
-
-### Comparison Table
+### Prompts vs Natural Language
 
 | Aspect | Natural Language | Prompt Template |
 |--------|------------------|-----------------|
 | **User Input** | Free text | Structured form |
-| **LLM Input** | Raw user text | Formatted template + data |
-| **Consistency** | Varies | Same structure every time |
+| **Consistency** | Varies by phrasing | Same structure every time |
 | **Best For** | Ad-hoc queries | Repetitive tasks |
-| **Discoverability** | Must know what to ask | Browse available prompts |
 | **Validation** | None | Type/required field checks |
-
-### When to Use Each
-
-**Use Natural Language**:
-- Ad-hoc questions: "What's the weather?"
-- Exploratory conversation
-- Quick, one-off requests
-- Power users who know what they want
-
-**Use Prompts**:
-- Repetitive workflows
-- Complex multi-step processes
-- Form-like data entry
-- Onboarding new users
-- When consistency matters
 
 **Best Practice**: Use **both** - natural language for exploration, prompts for structured workflows.
 
-### Prompts Are Optional
-You can build a fully functional MCP server without any prompts, relying entirely on natural language + tools/resources.
+---
+
+# MCP Client
+
+## Definition
+An **MCP Client** is the component (inside a host application like Claude Desktop or VS Code) that connects to MCP servers and makes their capabilities available to the LLM.
+
+**Host Application** manages user experience and coordinates multiple **MCP Clients**. Each client handles communication with one server.
+
+**You usually don't build clients** - you use existing ones (Claude Desktop, VS Code) to connect to your servers.
 
 ---
 
-## MCP Client Components
+## Core Client Features
 
-### Key Distinction
-**Host Application** (e.g., Claude Desktop, VS Code) manages the user experience and coordinates multiple **MCP Clients**. Each client handles communication with one server.
+These are features that **servers can request from clients** (server-to-client requests):
 
-### Core Client Features
+### 1. Elicitation 💬
+**Ask users for missing information** during server operations.
 
-MCP clients provide three special features that **servers can request**:
+- Servers can pause and request specific info from users dynamically
+- Creates flexible workflows that adapt to user needs
+- User fills structured form, server continues with data
 
-#### 1. **Elicitation** - Ask Users for Missing Info
-Servers can pause and request specific information from users dynamically.
-
-**Example**: A travel booking server needs final confirmation
+**Example**: Travel booking server needs final confirmation
 - Server asks: "Confirm Barcelona booking? Seat preference? Travel insurance?"
 - User fills structured form
 - Server continues with confirmed details
 
-**Key Point**: Flexible workflows that adapt to user needs, not rigid pre-defined paths.
+**Key Point**: Flexible workflows, not rigid pre-defined paths.
 
 ---
 
-#### 2. **Roots** - Communicate Filesystem Boundaries
-Clients tell servers which directories they can access (advisory, not security).
+### 2. Roots 📁
+**Communicate filesystem boundaries** to servers.
+
+- Clients tell servers which directories they can access
+- Advisory mechanism, not security enforcement
+- Helps scope work and prevent accidents
 
 **Example**: Travel agent workspace
 - Client exposes: `file:///Users/agent/travel-planning`
 - Client exposes: `file:///Users/agent/travel-templates`
 - Well-behaved servers respect these boundaries
 
-**Key Point**: Coordination mechanism for scoping work, preventing accidents. Not security enforcement.
+**Key Point**: Coordination for scoping work. Not a security boundary.
 
 ---
 
-#### 3. **Sampling** - Request AI Completions
-Servers ask clients to run LLM tasks on their behalf (server doesn't need own AI access).
+### 3. Sampling 🤖
+**Request AI completions** through the client.
+
+- Servers ask clients to run LLM tasks on their behalf
+- Server doesn't need its own AI/API access
+- Human-in-the-loop: user reviews AI response before it returns to server
 
 **Example**: Flight recommendation tool
 - Server gathers 47 flight options
@@ -234,50 +165,58 @@ Servers ask clients to run LLM tasks on their behalf (server doesn't need own AI
 - Client's LLM evaluates options
 - User reviews AI response before it returns to server
 
-**Key Point**: Human-in-the-loop AI tasks. Client controls security, permissions, and model access.
+**Key Point**: Client controls security, permissions, and model access.
 
 ---
 
 ### Summary Table
 
-| Feature | Purpose | Example |
-|---------|---------|---------|
-| **Elicitation** | Get missing info from users | "Which seat preference?" |
-| **Roots** | Define filesystem scope | "Work in this directory" |
-| **Sampling** | Request AI assistance | "Analyze this data for me" |
-
-**Remember**: These are **server-to-client requests** - servers ask clients for help, and clients maintain user control.
+| Feature | Direction | Purpose | Example |
+|---------|-----------|---------|---------|
+| **Elicitation** | Server → Client | Get missing info from users | "Which seat preference?" |
+| **Roots** | Client → Server | Define filesystem scope | "Work in this directory" |
+| **Sampling** | Server → Client | Request AI assistance | "Analyze this data for me" |
 
 ---
-# Local test MCP server + claude Desktop
 
-+ code $env:AppData\Claude\claude_desktop_config.json   
+# Additional Notes
 
+## User Interaction Model for Resources
+
+The MCP protocol **doesn't dictate UI** - each client application decides how to present resources:
+
+- **Tree/List Views**: Hierarchical file-explorer style
+- **Search/Filter**: Type to find resources
+- **Auto-inclusion**: AI decides which resources are relevant
+- **Manual Selection**: User explicitly chooses resources
+- **Bulk Selection**: Select multiple resources at once
+
+Protocol is **UI-agnostic** by design.
+
+---
+
+# Local Setup Reference
+
+## Claude Desktop Config
 ```powershell
+code $env:AppData\Claude\claude_desktop_config.json
+```
+
+```json
 {
   "mcpServers": {
-    "filesystem": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-filesystem",
-        "G:\\mcp-file-system-folder"
-      ]
-    },
     "weather": {
       "command": "C:\\ProgramData\\anaconda3\\Scripts\\conda.exe",
       "args": [
-        "run",
-        "-n",
-        "mcp",
-        "--no-capture-output",
-        "python",
-        "F:\\my-code\\MCP-TEST\\weather-mcp\\weather.py"
+        "run", "-n", "mcp", "--no-capture-output",
+        "python", "F:\\my-code\\MCP-TEST\\weather-mcp-server\\weather.py"
       ]
     }
   }
 }
 ```
 
-# Local test MCP server + MCP client (local chat test)
-`python client.py F:\my-code\MCP-TEST\weather-mcp-server\weather.py`
+## Local MCP Client Test
+```powershell
+python client.py F:\my-code\MCP-TEST\weather-mcp-server\weather.py
+```

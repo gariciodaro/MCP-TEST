@@ -90,6 +90,81 @@ Data Format:
 """
 
 
+@mcp.resource("weather://use-cases")
+def get_use_cases() -> str:
+    """Example use cases and sample prompts for this weather MCP server."""
+    return """Weather MCP Server - Use Cases & Examples
+
+═══════════════════════════════════════════════════════════
+🌤️  USE CASE 1: Daily Weather Check
+═══════════════════════════════════════════════════════════
+Scenario: Check the weather before planning your day
+
+Example prompts:
+  • "What's the weather forecast for New York City?"
+  • "Get the forecast for coordinates 40.7128, -74.0060"
+  • "What will the weather be like in Seattle this week?"
+
+Tool used: get_forecast(latitude, longitude)
+
+═══════════════════════════════════════════════════════════
+⚠️  USE CASE 2: Severe Weather Monitoring
+═══════════════════════════════════════════════════════════
+Scenario: Check for weather alerts before traveling or for safety
+
+Example prompts:
+  • "Are there any weather alerts in California?"
+  • "Check for severe weather warnings in TX"
+  • "What weather alerts are active in Florida right now?"
+
+Tool used: get_alerts(state)
+
+═══════════════════════════════════════════════════════════
+✈️  USE CASE 3: Travel Planning
+═══════════════════════════════════════════════════════════
+Scenario: Planning a trip and need weather info for multiple locations
+
+Example prompts:
+  • "I'm traveling to Miami next week. What's the forecast?"
+  • "Compare weather between Denver and Phoenix"
+  • "Check if there are any weather alerts for my road trip through TX, OK, and KS"
+
+Tools used: get_forecast + get_alerts
+
+═══════════════════════════════════════════════════════════
+🏠  USE CASE 4: Event Planning
+═══════════════════════════════════════════════════════════
+Scenario: Planning outdoor events and need reliable weather data
+
+Example prompts:
+  • "What's the weather forecast for Chicago for an outdoor wedding?"
+  • "Will it rain in Los Angeles this weekend?"
+  • "Check weather conditions for a hiking trip in Colorado"
+
+Tool used: get_forecast(latitude, longitude)
+
+═══════════════════════════════════════════════════════════
+📊  USE CASE 5: Integration with Other Systems
+═══════════════════════════════════════════════════════════
+Scenario: Combining weather data with other MCP servers
+
+Example integrations:
+  • Calendar + Weather: "What's the weather for my meetings tomorrow?"
+  • Maps + Weather: "Weather along my route from NYC to Boston"
+  • News + Weather: "Summarize weather-related news for California"
+
+This demonstrates MCP's power to combine multiple data sources!
+
+═══════════════════════════════════════════════════════════
+💡  TIPS FOR BEST RESULTS
+═══════════════════════════════════════════════════════════
+  • Use two-letter state codes for alerts (CA, NY, TX, etc.)
+  • Provide coordinates for precise forecast locations
+  • Check the 'example-cities' resource for coordinate references
+  • US locations only (NWS API limitation)
+"""
+
+
 async def make_nws_request(url: str) -> dict[str, Any] | None:
     """Make a request to the NWS API with proper error handling."""
     headers = {"User-Agent": USER_AGENT, "Accept": "application/geo+json"}
