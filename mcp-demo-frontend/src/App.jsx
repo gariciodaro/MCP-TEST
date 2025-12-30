@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import ReactMarkdown from 'react-markdown'
 import './App.css'
 
 const API_BASE = 'http://localhost:8000'
@@ -422,7 +423,9 @@ function App() {
                 {msg.role === 'assistant' && (
                   <div className="message-content assistant-message">
                     <span className="message-icon">🤖</span>
-                    <div className="message-text">{msg.content}</div>
+                    <div className="message-text markdown-content">
+                      <ReactMarkdown>{msg.content}</ReactMarkdown>
+                    </div>
                   </div>
                 )}
                 {msg.role === 'tool' && (
@@ -550,7 +553,9 @@ function App() {
             {promptPreview && (
               <div className="prompt-preview">
                 <h4>Preview:</h4>
-                <pre>{promptPreview}</pre>
+                <div className="prompt-preview-content markdown-content">
+                  <ReactMarkdown>{promptPreview}</ReactMarkdown>
+                </div>
               </div>
             )}
             

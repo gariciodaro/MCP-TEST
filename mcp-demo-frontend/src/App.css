@@ -348,6 +348,93 @@
   overflow-y: auto;
 }
 
+/* Markdown Content Styling */
+.markdown-content {
+  line-height: 1.6;
+}
+
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3,
+.markdown-content h4 {
+  margin-top: 1em;
+  margin-bottom: 0.5em;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.markdown-content h1 { font-size: 1.5em; }
+.markdown-content h2 { font-size: 1.3em; color: var(--accent-blue); }
+.markdown-content h3 { font-size: 1.1em; color: var(--accent-purple); }
+.markdown-content h4 { font-size: 1em; }
+
+.markdown-content p {
+  margin: 0.5em 0;
+}
+
+.markdown-content ul,
+.markdown-content ol {
+  margin: 0.5em 0;
+  padding-left: 1.5em;
+}
+
+.markdown-content li {
+  margin: 0.25em 0;
+}
+
+.markdown-content code {
+  background: var(--code-bg);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.9em;
+  font-family: 'Consolas', 'Monaco', monospace;
+}
+
+.markdown-content pre {
+  background: var(--code-bg);
+  padding: 12px 16px;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 0.75em 0;
+}
+
+.markdown-content pre code {
+  background: none;
+  padding: 0;
+}
+
+.markdown-content strong {
+  font-weight: 600;
+  color: var(--accent-yellow);
+}
+
+.markdown-content em {
+  font-style: italic;
+  color: var(--text-secondary);
+}
+
+.markdown-content blockquote {
+  border-left: 3px solid var(--accent-purple);
+  padding-left: 1em;
+  margin: 0.75em 0;
+  color: var(--text-secondary);
+}
+
+.markdown-content hr {
+  border: none;
+  border-top: 1px solid var(--border-color);
+  margin: 1em 0;
+}
+
+.markdown-content a {
+  color: var(--accent-blue);
+  text-decoration: none;
+}
+
+.markdown-content a:hover {
+  text-decoration: underline;
+}
+
 .loading .message-content {
   color: var(--text-secondary);
 }
@@ -686,6 +773,16 @@
   font-size: 0.85rem;
   color: var(--text-secondary);
   margin-bottom: 10px;
+}
+
+.prompt-preview-content {
+  background: var(--code-bg);
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  max-height: 200px;
+  overflow-y: auto;
 }
 
 .prompt-preview pre {
