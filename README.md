@@ -175,8 +175,6 @@ npm run dev
 # Next Steps
 
 - [ ] Add MCP Client features (Elicitation, Roots, Sampling)
-- [ ] Add more tools (calendar, email, etc.)
-- [ ] Deploy to production
 
 ---
 
