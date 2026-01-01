@@ -62,6 +62,116 @@ def get_supported_states() -> str:
     return "CA, NY, TX, ..."
 ```
 
+#### How to Make Resources Available to the LLM
+
+Resources are exposed by the server, but **how** the client provides them to the LLM is an implementation choice. Three main approaches:
+
+##### Approach 1: Auto-inject as Context
+Automatically fetch all (or relevant) resources and include them in the system prompt.
+
+```
+┌─────────────────────────────────────────────┐
+│ System Prompt:                              │
+│ "You have access to this context:           │
+│  [weather://supported-states content]       │
+│  [weather://example-cities content]"        │
+├─────────────────────────────────────────────┤
+│ User: "What states support weather alerts?" │
+└─────────────────────────────────────────────┘
+```
+
+| Pros | Cons |
+|------|------|
+| Simple to implement | Wastes tokens if resources are large/irrelevant |
+| LLM always has full context | No selectivity - all resources loaded every time |
+| No extra user interaction | Doesn't scale with many resources |
+
+**Best for:** Small, always-relevant datasets (config, reference data)
+
+##### Approach 2: LLM Requests Resources (Resource as Tool)
+Expose a tool like `read_resource(uri)` that the LLM can call when it needs information.
+
+```
+User: "What cities have pre-loaded coordinates?"
+    ↓
+LLM thinks: "I need the example-cities resource"
+LLM calls: read_resource("weather://example-cities")
+    ↓
+Client: fetches resource, returns content
+    ↓
+LLM: summarizes and responds
+```
+
+| Pros | Cons |
+|------|------|
+| Token efficient (on-demand) | Extra round-trip for LLM to decide |
+| Scales to many resources | LLM might not know what resources exist |
+| LLM reasons about what it needs | Requires listing available resources somehow |
+
+**Best for:** Large knowledge bases, dynamic data, many resources
+
+**Where does this tool live?** On the **MCP Client**, not the server.
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  AI Application                                         │
+│  ┌───────────────────────────────────────────────────┐  │
+│  │  MCP Client                                       │  │
+│  │  • Gets tools from servers → sends to LLM        │  │
+│  │  • Gets resources list from servers              │  │
+│  │                                                   │  │
+│  │  ★ Creates SYNTHETIC tool: read_resource(uri)    │  │
+│  │    - Not from any server                          │  │
+│  │    - Client intercepts this call                  │  │
+│  │    - Client uses MCP protocol to fetch resource   │  │
+│  └───────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────┘
+                        │ MCP Protocol (already has resources/read)
+                        ▼
+┌─────────────────────────────────────────────────────────┐
+│  MCP Server                                             │
+│  • Exposes tools (get_forecast, get_alerts)            │
+│  • Exposes resources (weather://supported-states)       │
+│  • Does NOT need a "read_resource" tool                 │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Why on the client, not server?**
+- MCP protocol **already** has `resources/read` - servers don't need to duplicate it as a tool
+- Client already knows how to read resources via protocol
+- Works across **all** servers without each implementing it
+- Client controls what tools the LLM sees
+
+---
+User explicitly selects which resources to include before or during chat (like attaching files).
+
+```
+UI: ☑ supported-states  ☑ example-cities  ☐ api-info
+
+User selects, then asks → Client includes selected resources as context
+```
+
+| Pros | Cons |
+|------|------|
+| User controls exactly what's included | Requires user to understand resources |
+| Transparent - user sees what AI "knows" | Extra friction before chatting |
+| Works for focused tasks | User might forget relevant context |
+
+**Best for:** Document-heavy workflows, expert users, compliance scenarios
+
+##### Comparison Summary
+
+| Approach | Who Decides? | Token Usage | User Effort | Best For |
+|----------|--------------|-------------|-------------|----------|
+| **Auto-inject** | System | High | None | Small reference data |
+| **LLM requests** | AI | Efficient | None | Large knowledge bases |
+| **User selects** | Human | Controlled | Manual | Transparency, experts |
+
+**Hybrid approaches** are also valid:
+- Auto-inject essentials + LLM requests extras
+- User selects initial context + LLM can dig deeper
+- Smart auto-inject based on query analysis
+
 ---
 
 ### 3. Prompts (Templates) 📝
