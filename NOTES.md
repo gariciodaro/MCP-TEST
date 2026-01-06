@@ -330,3 +330,249 @@ code $env:AppData\Claude\claude_desktop_config.json
 ```powershell
 python client.py F:\my-code\MCP-TEST\weather-mcp-server\weather.py
 ```
+
+---
+
+# Troubleshooting: Issues Encountered Building the Demo
+
+This section documents issues we encountered while building the MCP demo with WebSocket elicitation support.
+
+---
+
+## Issue 1: PromptArgument Not JSON Serializable
+
+**Error:**
+```
+"Object of type PromptArgument is not JSON serializable"
+```
+
+**Cause:** `list_prompts()` returned raw MCP SDK `PromptArgument` objects instead of plain dicts.
+
+**Solution:** Convert each argument to a dict:
+```python
+"arguments": [
+    {
+        "name": arg.name,
+        "description": getattr(arg, 'description', ''),
+        "required": getattr(arg, 'required', False)
+    }
+    for arg in getattr(prompt, 'arguments', []) or []
+]
+```
+
+**File:** `mcp_client.py` - `list_prompts()` method
+
+---
+
+## Issue 2: Tool Output Not JSON Serializable
+
+**Error:**
+```
+"Object of type get_forecastOutput is not JSON serializable"
+```
+
+**Cause:** FastMCP client returns typed result objects (e.g., `get_forecastOutput`) instead of plain strings when using elicitation support.
+
+**Solution:** Handle various result types in `_call_tool_with_elicitation()`:
+```python
+if hasattr(result, 'data'):
+    data = result.data
+    if isinstance(data, str):
+        return data
+    elif hasattr(data, 'model_dump_json'):
+        return data.model_dump_json()  # Pydantic model
+    elif hasattr(data, '__dict__'):
+        return json.dumps(data.__dict__, default=str)  # Dataclass
+    else:
+        return str(data)
+```
+
+**File:** `mcp_client.py` - `_call_tool_with_elicitation()` method
+
+---
+
+## Issue 3: ctx.elicit() Wrong Parameter Name
+
+**Error:**
+```
+"Context.elicit() got an unexpected keyword argument 'response_type'"
+```
+
+**Cause:** The MCP server's `Context.elicit()` method uses `schema=` parameter, not `response_type=`.
+
+**Solution:** Change the call in weather.py:
+```python
+# Wrong
+result = await ctx.elicit(message="...", response_type=TripDetails)
+
+# Correct
+result = await ctx.elicit(message="...", schema=TripDetails)
+```
+
+**File:** `weather-mcp-server/weather.py` - `plan_trip()` tool
+
+---
+
+## Issue 4: Elicitation Schema Must Be Pydantic Model
+
+**Cause:** MCP specification requires elicitation schemas to be Pydantic models (not dataclasses). The server validates that only primitive types are used.
+
+**Solution:** Change from dataclass to Pydantic BaseModel:
+```python
+# Wrong
+@dataclass
+class TripDetails:
+    travel_date: str
+    num_days: int
+    activities: str
+
+# Correct
+from pydantic import BaseModel
+
+class TripDetails(BaseModel):
+    travel_date: str
+    num_days: int
+    activities: str
+```
+
+**File:** `weather-mcp-server/weather.py`
+
+---
+
+## Issue 5: ElicitResult Uses `content`, Not `data`
+
+**Cause:** The MCP protocol's `ElicitResult` expects `content=` for accepted data, not returning a raw dict.
+
+**Solution:** Return proper `ElicitResult` with content field:
+```python
+# Wrong
+if action == "accept":
+    return response.get("data", {})
+
+# Correct
+if action == "accept":
+    return ElicitResult(action="accept", content=data)
+```
+
+**Note:** The `content` field expects `dict[str, Union[str, int, float, bool, list[str], None]]` - a dict of primitives only.
+
+**File:** `mcp_client.py` - `elicitation_handler`
+
+---
+
+## Issue 6: WebSocket Elicitation Deadlock (CRITICAL!)
+
+**Error:** Elicitation always timed out immediately, user response came too late.
+
+**Symptoms in logs:**
+```
+22:00:00,838 - elicitation_handler: timeout
+22:00:06,565 - resolve_elicitation: response={...}
+22:00:06,565 - No pending elicitation or already done!
+```
+
+**Root Cause:** Classic async deadlock:
+
+```
+handle_messages() 
+  → handle_chat() 
+    → process_query() 
+      → call_tool() 
+        → handle_elicitation() 
+          → waits on Future...
+```
+
+The main message loop (`handle_messages`) was blocked inside `handle_chat`, waiting for `process_query` to finish. But `process_query` was waiting for elicitation response. The only way to receive that response was through the blocked `handle_messages` loop - **DEADLOCK**.
+
+**Solution:** `handle_elicitation` must receive WebSocket messages directly while waiting, instead of using a Future that the blocked main loop would resolve:
+
+```python
+async def handle_elicitation(self, message: str, schema: dict) -> dict:
+    await self.send({
+        "type": "elicitation",
+        "message": message,
+        "schema": schema
+    })
+    
+    # Receive messages directly here since main loop is blocked
+    start_time = asyncio.get_event_loop().time()
+    timeout = 120
+    
+    while True:
+        elapsed = asyncio.get_event_loop().time() - start_time
+        if elapsed >= timeout:
+            return {"action": "cancel", "reason": "timeout"}
+        
+        try:
+            data = await asyncio.wait_for(
+                self.websocket.receive_json(),
+                timeout=min(timeout - elapsed, 30)
+            )
+            
+            if data.get("type") == "elicitation_response":
+                return {
+                    "action": data.get("action", "cancel"),
+                    "data": data.get("data", {})
+                }
+        except asyncio.TimeoutError:
+            continue
+```
+
+**Key Insight:** When you have a request-response pattern inside an already-blocked async chain, you can't rely on the outer loop to receive the response. The inner function must handle its own I/O.
+
+**File:** `routes/websocket.py` - `handle_elicitation()` method
+
+---
+
+## Why WebSocket for Elicitation?
+
+HTTP is request-response: client sends request, server sends ONE response, done. 
+
+Elicitation requires:
+1. Client sends chat message
+2. Server starts processing, tool needs user input
+3. Server sends elicitation request **mid-processing**
+4. Client responds with user input
+5. Server continues processing
+6. Server sends final response
+
+This is impossible with HTTP - you can't send multiple responses to one request.
+
+---
+
+## FastMCP Client vs Standard MCP Client
+
+- **Standard `ClientSession`**: No elicitation support, simpler
+- **FastMCP `Client`**: Supports `elicitation_handler` callback for tools that use `ctx.elicit()`
+
+We use FastMCP client when elicitation is needed, standard client otherwise.
+
+---
+
+## Logging in Uvicorn
+
+Regular `print()` statements may be buffered. Use Python's `logging` module with WARNING or higher level:
+
+```python
+import logging
+logger = logging.getLogger(__name__)
+logger.warning("This will show in uvicorn output")
+```
+
+Configure in main.py:
+```python
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+```
+
+---
+
+## Key Learnings
+
+1. **MCP SDK objects aren't JSON-serializable** - always convert to dicts
+2. **Pydantic vs Dataclass** - MCP elicitation requires Pydantic models
+3. **Async deadlocks are subtle** - trace the full call chain when debugging
+4. **WebSocket message loops** - be careful what blocks them
+5. **Read the actual API signatures** - parameter names matter (`schema` vs `response_type`)

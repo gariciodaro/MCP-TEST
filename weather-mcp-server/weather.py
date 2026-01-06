@@ -1,7 +1,8 @@
 from typing import Any
+from dataclasses import dataclass
 
 import httpx
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import FastMCP, Context
 
 # Initialize FastMCP server
 mcp = FastMCP("weather")
@@ -244,6 +245,108 @@ Forecast: {period["detailedForecast"]}
         forecasts.append(forecast)
 
     return "\n---\n".join(forecasts)
+
+
+# ============== ELICITATION DEMO ==============
+# Tool that demonstrates elicitation - asking user for input mid-execution
+
+from pydantic import BaseModel
+
+class TripDetails(BaseModel):
+    """Details for trip planning"""
+    travel_date: str
+    num_days: int
+    activities: str  # "outdoor", "indoor", or "mixed"
+
+
+@mcp.tool()
+async def plan_trip(destination: str, ctx: Context) -> str:
+    """Plan a trip with weather-aware recommendations.
+    
+    This tool demonstrates MCP elicitation by asking the user for
+    additional details mid-execution.
+    
+    Args:
+        destination: City name for the trip (e.g., "New York", "Denver")
+    """
+    # Check if destination is in our known cities
+    city_data = EXAMPLE_CITIES.get(destination)
+    if not city_data:
+        available = ", ".join(EXAMPLE_CITIES.keys())
+        return f"Sorry, '{destination}' is not in our database. Available cities: {available}"
+    
+    # Step 1: Ask user for trip details via elicitation
+    result = await ctx.elicit(
+        message=f"Planning trip to {destination}. Please provide your trip details:",
+        schema=TripDetails
+    )
+    
+    if result.action == "decline":
+        return "Trip planning cancelled - you declined to provide details."
+    
+    if result.action == "cancel":
+        return "Trip planning cancelled."
+    
+    # User accepted - get their data
+    trip_data = result.data
+    
+    # Step 2: Fetch weather for the destination
+    lat, lon = city_data["lat"], city_data["lon"]
+    state = city_data["state"]
+    
+    # Get forecast
+    points_url = f"{NWS_API_BASE}/points/{lat},{lon}"
+    points_data = await make_nws_request(points_url)
+    
+    forecast_text = "Weather data unavailable"
+    if points_data:
+        forecast_url = points_data["properties"]["forecast"]
+        forecast_data = await make_nws_request(forecast_url)
+        if forecast_data:
+            periods = forecast_data["properties"]["periods"][:trip_data.num_days * 2]  # day + night per day
+            forecast_text = "\n".join([
+                f"  • {p['name']}: {p['temperature']}°{p['temperatureUnit']}, {p['shortForecast']}"
+                for p in periods
+            ])
+    
+    # Get alerts
+    alerts_url = f"{NWS_API_BASE}/alerts/active/area/{state}"
+    alerts_data = await make_nws_request(alerts_url)
+    alerts_text = "No active alerts"
+    if alerts_data and alerts_data.get("features"):
+        alerts_text = "\n".join([
+            f"  ⚠️ {f['properties']['event']}: {f['properties']['headline']}"
+            for f in alerts_data["features"][:3]
+        ])
+    
+    # Step 3: Generate recommendations based on weather + preferences
+    activity_rec = ""
+    if trip_data.activities == "outdoor":
+        activity_rec = "Since you prefer outdoor activities, check the forecast for clear days."
+    elif trip_data.activities == "indoor":
+        activity_rec = "For indoor activities, weather won't affect your plans much."
+    else:
+        activity_rec = "With mixed activities, have backup indoor plans for bad weather days."
+    
+    return f"""
+🗺️ Trip Plan for {destination}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📅 Travel Date: {trip_data.travel_date}
+⏱️ Duration: {trip_data.num_days} days
+🎯 Activity Preference: {trip_data.activities}
+
+🌤️ Weather Forecast:
+{forecast_text}
+
+🚨 Weather Alerts:
+{alerts_text}
+
+💡 Recommendation:
+{activity_rec}
+
+Have a great trip! 🧳
+"""
 
 
 # ============== PROMPTS ==============

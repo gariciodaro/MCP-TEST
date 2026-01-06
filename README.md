@@ -40,12 +40,20 @@ If you're building or maintaining **AI-powered applications**, you need to under
 MCP-TEST/
 ├── weather-mcp-server/     # MCP Server (Python + FastMCP)
 │   └── weather.py          # Exposes weather tools, resources, prompts
+│
 ├── mcp-demo-backend/       # MCP Client + API (FastAPI)
-│   ├── main.py             # REST endpoints
-│   └── mcp_client.py       # Connects to MCP server + Anthropic API
+│   ├── main.py             # App setup, CORS, router registration
+│   ├── config.py           # API key, CORS origins
+│   ├── models.py           # Pydantic request/response schemas
+│   ├── mcp_client.py       # Unified MCP client with elicitation support
+│   └── routes/
+│       ├── http.py         # REST endpoints (no elicitation)
+│       └── websocket.py    # WebSocket with elicitation support
+│
 ├── mcp-demo-frontend/      # Web UI (Vite + React)
 │   └── src/App.jsx         # Chat interface with MCP features
-└── imgs/                   # Screenshots
+│
+└── NOTES.md                # Detailed notes & troubleshooting
 ```
 
 ---
@@ -118,6 +126,98 @@ def weekly_planning(city: str) -> str:
 
 ---
 
+## 4. Elicitation 💬
+**Tools that ask follow-up questions** - interactive mid-execution input.
+
+Elicitation allows a tool to pause execution and ask the user for additional information. This enables conversational, multi-step workflows.
+
+```python
+from pydantic import BaseModel
+
+class TripDetails(BaseModel):
+    travel_date: str
+    num_days: int
+    activities: str
+
+@mcp.tool()
+async def plan_trip(destination: str, ctx: Context) -> str:
+    """Plan a trip with weather-aware recommendations."""
+    
+    # Pause and ask user for details
+    result = await ctx.elicit(
+        message=f"Planning trip to {destination}. Please provide details:",
+        schema=TripDetails
+    )
+    
+    if result.action == "cancel":
+        return "Trip planning cancelled."
+    
+    # Continue with user's input
+    trip_data = result.data
+    # ... fetch weather, generate recommendations
+```
+
+**In the UI:** 
+1. Ask "Plan a trip to New York"
+2. AI calls `plan_trip` tool
+3. Modal appears asking for travel date, duration, activities
+4. User fills form and submits
+5. Tool continues with that data
+6. AI returns personalized trip plan with weather
+
+**Why Elicitation matters:** Traditional tools are fire-and-forget. Elicitation enables tools that have a conversation with the user, gathering context as needed.
+
+---
+
+# MCP Client Features
+
+The backend implements an MCP Client that connects to servers and orchestrates tool execution with Claude.
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Frontend (React)                                       │
+│  - WebSocket connection for real-time chat              │
+│  - Elicitation modal for user input                     │
+└────────────────────────┬────────────────────────────────┘
+                         │ WebSocket
+                         ▼
+┌─────────────────────────────────────────────────────────┐
+│  Backend (FastAPI)                                      │
+│  ┌───────────────────────────────────────────────────┐  │
+│  │  MCP Client                                       │  │
+│  │  - Connects to MCP servers via stdio              │  │
+│  │  - Sends queries to Claude                        │  │
+│  │  - Executes tool calls                            │  │
+│  │  - Handles elicitation callbacks                  │  │
+│  └───────────────────────────────────────────────────┘  │
+└────────────────────────┬────────────────────────────────┘
+                         │ stdio
+                         ▼
+┌─────────────────────────────────────────────────────────┐
+│  MCP Server (weather.py)                                │
+│  - Tools, Resources, Prompts                            │
+│  - Elicitation via ctx.elicit()                         │
+└─────────────────────────────────────────────────────────┘
+```
+
+## Why WebSocket?
+
+HTTP is request-response: one request → one response.
+
+Elicitation requires **multiple exchanges** during a single "chat":
+1. User sends message
+2. AI starts processing, tool needs input
+3. Server sends elicitation request
+4. User responds
+5. Tool continues
+6. Server sends final response
+
+This is impossible with HTTP. WebSocket provides the bidirectional channel needed.
+
+---
+
 # Quick Start
 
 ## Prerequisites
@@ -169,12 +269,41 @@ npm run dev
 | **Tools** | Actions to execute | Verbs - *"do something"* |
 | **Resources** | Data to read | Nouns - *"get information"* |
 | **Prompts** | Structured templates | Forms - *"guided workflow"* |
+| **Elicitation** | Mid-execution questions | Dialog - *"ask for more"* |
+
+---
+
+# Backend Structure
+
+```
+mcp-demo-backend/
+├── main.py             # FastAPI app, CORS, router registration
+├── config.py           # Environment config (API key, CORS origins)
+├── models.py           # Pydantic schemas for API requests/responses
+├── mcp_client.py       # Unified MCP client
+│   ├── MCPClient       # Main class
+│   ├── connect()       # Connect to MCP server via stdio
+│   ├── list_tools()    # Get available tools
+│   ├── list_resources()# Get available resources
+│   ├── list_prompts()  # Get available prompts
+│   ├── call_tool()     # Execute a tool (with optional elicitation)
+│   └── process_query() # Full Claude conversation loop
+│
+└── routes/
+    ├── http.py         # REST API (no elicitation support)
+    │   └── /status, /connect, /chat, /tools, /resources, /prompts
+    │
+    └── websocket.py    # WebSocket API (with elicitation)
+        └── /ws/chat    # Real-time chat with elicitation support
+```
 
 ---
 
 # Next Steps
 
-- [ ] Add MCP Client features (Elicitation, Roots, Sampling)
+- [x] ~~Add Elicitation support~~ ✅ Implemented!
+- [ ] Add Roots feature
+- [ ] Add Sampling feature
 
 ---
 
