@@ -24,6 +24,13 @@ from anthropic import Anthropic
 logger = logging.getLogger(__name__)
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+from mcp.types import (
+    CreateMessageRequestParams,
+    CreateMessageResult,
+    TextContent,
+    SamplingMessage,
+    SamplingCapability,
+)
 
 
 # =============================================================================
@@ -39,6 +46,14 @@ class ToolCall:
 
 
 @dataclass
+class SamplingRequest:
+    """Represents a sampling request from an MCP server."""
+    messages: list[dict]
+    system_prompt: Optional[str]
+    max_tokens: int
+
+
+@dataclass
 class MCPResponse:
     """Response from processing a user query."""
     content: str
@@ -51,6 +66,10 @@ class MCPResponse:
 
 # Callback signature for elicitation: (message, schema) -> user response
 ElicitationCallback = Callable[[str, dict], Awaitable[dict[str, Any]]]
+
+# Callback signature for sampling: (request) -> approved response or None
+# Returns tuple of (approved: bool, response: str | None)
+SamplingCallback = Callable[[SamplingRequest], Awaitable[tuple[bool, Optional[str]]]]
 
 
 # =============================================================================
@@ -106,7 +125,7 @@ def build_schema_from_dataclass(dataclass_type) -> dict:
 
 class MCPClient:
     """
-    Unified MCP Client with optional elicitation support.
+    Unified MCP Client with optional elicitation and sampling support.
     
     Usage:
         client = MCPClient(api_key)
@@ -122,18 +141,25 @@ class MCPClient:
         )
         
         await client.cleanup()
+    
+    Sampling:
+        The MCP server can request the client to make LLM calls.
+        Set a sampling_callback to approve/handle these requests.
     """
     
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, sampling_callback: Optional[SamplingCallback] = None):
         """
         Initialize the MCP client.
         
         Args:
             api_key: Anthropic API key for Claude interactions
+            sampling_callback: Optional callback for server-initiated LLM requests.
+                              Called with SamplingRequest, returns (approved, response).
         """
         self.api_key = api_key
         self.anthropic = Anthropic(api_key=api_key)
         self.exit_stack = AsyncExitStack()
+        self.sampling_callback = sampling_callback
         
         # Connection state
         self.session: Optional[ClientSession] = None
@@ -173,15 +199,127 @@ class MCPClient:
         )
         read_stream, write_stream = stdio_transport
         
+        # Build sampling callback wrapper if provided
+        sampling_fn = None
+        sampling_caps = None
+        if self.sampling_callback:
+            sampling_fn = self._create_sampling_handler()
+            # Advertise sampling capability to the server
+            sampling_caps = SamplingCapability()
+            logger.info(f"Sampling callback configured: {sampling_fn}, capabilities: {sampling_caps}")
+        else:
+            logger.warning("No sampling callback provided!")
+        
         self.session = await self.exit_stack.enter_async_context(
-            ClientSession(read_stream, write_stream)
+            ClientSession(
+                read_stream, 
+                write_stream, 
+                sampling_callback=sampling_fn,
+                sampling_capabilities=sampling_caps
+            )
         )
+        
+        # Debug: verify the session's sampling callback
+        logger.info(f"Session sampling callback: {self.session._sampling_callback}")
         
         await self.session.initialize()
         self.server_path = server_path
         self.connected = True
         
         return await self.list_tools()
+    
+    def _create_sampling_handler(self):
+        """
+        Create a sampling handler function for the ClientSession.
+        
+        This wraps our callback and handles the MCP protocol conversion.
+        The MCP server calls create_message() and we respond with LLM output.
+        """
+        async def sampling_handler(context, params: CreateMessageRequestParams):
+            """Handle sampling request from MCP server."""
+            logger.info(f"Sampling request received: {len(params.messages)} messages, max_tokens={params.maxTokens}")
+            
+            # Convert MCP messages to our format
+            messages = []
+            for msg in params.messages:
+                content = msg.content
+                if hasattr(content, 'text'):
+                    content = content.text
+                messages.append({
+                    "role": msg.role,
+                    "content": str(content)
+                })
+            
+            # Create the sampling request
+            request = SamplingRequest(
+                messages=messages,
+                system_prompt=params.systemPrompt,
+                max_tokens=params.maxTokens
+            )
+            
+            # Call user's callback for approval
+            try:
+                approved, response_text = await self.sampling_callback(request)
+                
+                if not approved:
+                    # User rejected the sampling request
+                    logger.info("Sampling request rejected by user")
+                    return CreateMessageResult(
+                        role="assistant",
+                        content=TextContent(type="text", text="[Sampling request rejected by user]"),
+                        model="rejected",
+                        stopReason="endTurn"
+                    )
+                
+                # If callback provided a response, use it directly
+                if response_text:
+                    logger.info(f"Sampling callback provided response: {response_text[:100]}...")
+                    return CreateMessageResult(
+                        role="assistant",
+                        content=TextContent(type="text", text=response_text),
+                        model="user-provided",
+                        stopReason="endTurn"
+                    )
+                
+                # Otherwise, make the LLM call ourselves
+                logger.info("Making LLM call for approved sampling request")
+                
+                # Build messages for Claude
+                claude_messages = messages
+                
+                # Make the API call
+                api_response = self.anthropic.messages.create(
+                    model="claude-sonnet-4-20250514",
+                    max_tokens=params.maxTokens,
+                    system=params.systemPrompt or "",
+                    messages=claude_messages
+                )
+                
+                # Extract text from response
+                result_text = ""
+                for block in api_response.content:
+                    if block.type == 'text':
+                        result_text += block.text
+                
+                logger.info(f"LLM sampling response: {result_text[:100]}...")
+                
+                return CreateMessageResult(
+                    role="assistant",
+                    content=TextContent(type="text", text=result_text),
+                    model=api_response.model,
+                    stopReason=api_response.stop_reason or "endTurn"
+                )
+                
+            except Exception as e:
+                logger.error(f"Sampling error: {e}")
+                return CreateMessageResult(
+                    role="assistant",
+                    content=TextContent(type="text", text=f"[Sampling error: {e}]"),
+                    model="error",
+                    stopReason="endTurn"
+                )
+        
+        return sampling_handler
     
     async def cleanup(self) -> None:
         """Disconnect and release all resources."""
@@ -406,9 +544,64 @@ class MCPClient:
                 logger.warning(f"DEBUG elicitation_handler exception: {e}")
                 return ElicitResult(action="cancel")
         
+        async def sampling_handler(messages, params, ctx):
+            """Bridge between FastMCP sampling and our callback."""
+            logger.info(f"FastMCP sampling handler called: {len(messages)} messages")
+            
+            # Convert MCP messages to our format
+            converted_messages = []
+            for msg in messages:
+                content = msg.content
+                if hasattr(content, 'text'):
+                    content = content.text
+                converted_messages.append({
+                    "role": msg.role,
+                    "content": str(content)
+                })
+            
+            # Create the sampling request
+            request = SamplingRequest(
+                messages=converted_messages,
+                system_prompt=params.systemPrompt,
+                max_tokens=params.maxTokens
+            )
+            
+            # Call user's callback for approval
+            if self.sampling_callback:
+                approved, response_text = await self.sampling_callback(request)
+                
+                if not approved:
+                    logger.info("Sampling request rejected by user")
+                    return "[Sampling request rejected by user]"
+                
+                if response_text:
+                    logger.info(f"User provided response: {response_text[:100]}...")
+                    return response_text
+                
+                # Make the LLM call ourselves
+                logger.info("Making LLM call for approved sampling request")
+                api_response = self.anthropic.messages.create(
+                    model="claude-sonnet-4-20250514",
+                    max_tokens=params.maxTokens,
+                    system=params.systemPrompt or "",
+                    messages=converted_messages
+                )
+                
+                result_text = ""
+                for block in api_response.content:
+                    if block.type == 'text':
+                        result_text += block.text
+                
+                logger.info(f"LLM response: {result_text[:100]}...")
+                return result_text
+            else:
+                return "[No sampling callback configured]"
+        
         async with FastMCPClient(
             self.server_path,
-            elicitation_handler=elicitation_handler
+            elicitation_handler=elicitation_handler,
+            sampling_handler=sampling_handler,
+            sampling_capabilities=SamplingCapability()
         ) as client:
             result = await client.call_tool(name, arguments)
             

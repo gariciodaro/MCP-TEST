@@ -904,3 +904,131 @@
   border-radius: 0 0 12px 12px;
 }
 
+
+/* Sampling Modal */
+.sampling-overlay {
+  z-index: 2001;
+}
+
+.sampling-modal {
+  max-width: 700px;
+  width: 95%;
+  max-height: 90vh;
+  overflow-y: auto;
+  animation: modalSlideIn 0.3s ease;
+  background: var(--bg-primary);
+  border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  border: 1px solid var(--border-color);
+}
+
+.sampling-header {
+  padding: 20px;
+  border-bottom: 1px solid var(--border-color);
+  background: linear-gradient(180deg, rgba(245, 158, 11, 0.15) 0%, transparent 100%);
+}
+
+.sampling-header h2 {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.sampling-message {
+  padding: 16px 20px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.sampling-message p {
+  margin: 0 0 8px 0;
+  color: var(--text-primary);
+}
+
+.sampling-description {
+  font-size: 13px;
+  color: var(--text-secondary);
+  background: rgba(245, 158, 11, 0.1);
+  padding: 10px;
+  border-radius: 6px;
+  border-left: 3px solid #f59e0b;
+}
+
+.sampling-details {
+  padding: 20px;
+}
+
+.sampling-section {
+  margin-bottom: 16px;
+}
+
+.sampling-section label {
+  display: block;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.sampling-section pre {
+  background: var(--bg-secondary);
+  padding: 12px;
+  border-radius: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 13px;
+  color: var(--text-primary);
+  margin: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid var(--border-color);
+}
+
+.sampling-messages {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.sampling-msg {
+  background: var(--bg-secondary);
+  padding: 10px 12px;
+  border-radius: 8px;
+  margin-bottom: 8px;
+  border-left: 3px solid var(--border-color);
+}
+
+.sampling-msg.user {
+  border-left-color: #3b82f6;
+}
+
+.sampling-msg.assistant {
+  border-left-color: #10b981;
+}
+
+.sampling-msg .msg-role {
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+  display: block;
+}
+
+.sampling-msg pre {
+  margin: 4px 0 0 0;
+  padding: 0;
+  background: none;
+  border: none;
+}
+
+.sampling-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 16px 20px;
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  border-radius: 0 0 16px 16px;
+}
+

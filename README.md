@@ -167,6 +167,61 @@ async def plan_trip(destination: str, ctx: Context) -> str:
 
 **Why Elicitation matters:** Traditional tools are fire-and-forget. Elicitation enables tools that have a conversation with the user, gathering context as needed.
 
+![Elicitation Demo](imgs/elicitation.png)
+
+---
+
+## 5. Sampling 🤖
+**Server requests AI assistance from client** - reverse LLM flow.
+
+Sampling allows the MCP server to request the client's LLM to process data. Instead of the client asking the AI to use tools, the **tool asks the client for AI help**.
+
+```python
+from mcp.types import SamplingMessage, TextContent as MCPTextContent
+
+@mcp.tool()
+async def analyze_weather_pattern(cities: str, ctx: Context) -> str:
+    """Analyze weather patterns using AI assistance."""
+    
+    # Fetch weather data for cities...
+    weather_data = await fetch_weather(cities)
+    
+    # Request client's LLM to analyze the data
+    result = await ctx.session.create_message(
+        messages=[
+            SamplingMessage(
+                role="user",
+                content=MCPTextContent(
+                    type="text",
+                    text=f"Analyze this weather data: {weather_data}"
+                )
+            )
+        ],
+        max_tokens=500,
+        system_prompt="You are a weather analyst."
+    )
+    
+    return f"Analysis: {result.content.text}"
+```
+
+**In the UI:**
+1. Ask "Analyze weather patterns for New York, Los Angeles, Chicago"
+2. AI calls `analyze_weather_pattern` tool
+3. Tool fetches weather data from NWS API
+4. Tool requests AI analysis via sampling
+5. Modal appears: "Server wants AI to analyze data. Approve?"
+6. User clicks "Approve & Generate"
+7. Client's LLM analyzes the weather data
+8. Tool returns combined raw data + AI analysis
+
+**Why Sampling matters:**
+- **Server doesn't need its own AI** - uses client's LLM access
+- **Human in the loop** - user sees and approves what server is asking
+- **Data locality** - server only sends what's needed for analysis
+- **Consistent AI** - same model for all operations
+
+![Sampling Demo](imgs/sampling.png)
+
 ---
 
 # MCP Client Features
@@ -199,6 +254,7 @@ The backend implements an MCP Client that connects to servers and orchestrates t
 │  MCP Server (weather.py)                                │
 │  - Tools, Resources, Prompts                            │
 │  - Elicitation via ctx.elicit()                         │
+│  - Sampling via ctx.session.create_message()            │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -206,11 +262,11 @@ The backend implements an MCP Client that connects to servers and orchestrates t
 
 HTTP is request-response: one request → one response.
 
-Elicitation requires **multiple exchanges** during a single "chat":
+Elicitation and Sampling require **multiple exchanges** during a single "chat":
 1. User sends message
-2. AI starts processing, tool needs input
-3. Server sends elicitation request
-4. User responds
+2. AI starts processing, tool needs input (elicitation) or AI help (sampling)
+3. Server sends request to client
+4. User responds (elicitation) or approves AI call (sampling)
 5. Tool continues
 6. Server sends final response
 
@@ -270,6 +326,7 @@ npm run dev
 | **Resources** | Data to read | Nouns - *"get information"* |
 | **Prompts** | Structured templates | Forms - *"guided workflow"* |
 | **Elicitation** | Mid-execution questions | Dialog - *"ask for more"* |
+| **Sampling** | Server requests AI help | Delegation - *"analyze this for me"* |
 
 ---
 
@@ -302,8 +359,8 @@ mcp-demo-backend/
 # Next Steps
 
 - [x] ~~Add Elicitation support~~ ✅ Implemented!
+- [x] ~~Add Sampling feature~~ ✅ Implemented!
 - [ ] Add Roots feature
-- [ ] Add Sampling feature
 
 ---
 

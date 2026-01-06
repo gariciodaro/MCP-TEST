@@ -30,6 +30,10 @@ function App() {
   const [showElicitation, setShowElicitation] = useState(false)
   const [elicitationData, setElicitationData] = useState(null)
   const [elicitationForm, setElicitationForm] = useState({})
+  
+  // Sampling modal state
+  const [showSampling, setShowSampling] = useState(false)
+  const [samplingData, setSamplingData] = useState(null)
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -98,6 +102,16 @@ function App() {
           })
           setElicitationForm({})
           setShowElicitation(true)
+          break
+          
+        case 'sampling_request':
+          // Show sampling approval modal
+          setSamplingData({
+            messages: data.messages,
+            system_prompt: data.system_prompt,
+            max_tokens: data.max_tokens
+          })
+          setShowSampling(true)
           break
           
         case 'response':
@@ -174,6 +188,7 @@ function App() {
       console.log('WebSocket closed')
       setConnected(false)
       setShowElicitation(false)
+      setShowSampling(false)
       wsRef.current = null
     }
   }
@@ -193,6 +208,7 @@ function App() {
     setPrompts([])
     setMessages([])
     setShowElicitation(false)
+    setShowSampling(false)
     setLoading(false)
   }
 
@@ -258,6 +274,41 @@ function App() {
     setShowElicitation(false)
     setElicitationData(null)
     setElicitationForm({})
+    setLoading(false)
+  }
+  
+  // Sampling handlers
+  const handleSamplingApprove = () => {
+    if (!wsRef.current) return
+    
+    wsRef.current.send(JSON.stringify({
+      type: 'sampling_response',
+      approved: true,
+      response: null  // Let the client call the LLM
+    }))
+    
+    setMessages(prev => [...prev, { 
+      role: 'system', 
+      content: '✅ Approved LLM sampling request - generating response...' 
+    }])
+    setShowSampling(false)
+    setSamplingData(null)
+  }
+  
+  const handleSamplingReject = () => {
+    if (!wsRef.current) return
+    
+    wsRef.current.send(JSON.stringify({
+      type: 'sampling_response',
+      approved: false
+    }))
+    
+    setMessages(prev => [...prev, { 
+      role: 'system', 
+      content: '❌ Rejected LLM sampling request' 
+    }])
+    setShowSampling(false)
+    setSamplingData(null)
     setLoading(false)
   }
   
@@ -570,6 +621,7 @@ function App() {
                     <li>"Are there any weather alerts in CA?"</li>
                     <li>"Get the forecast for NYC (40.7128, -74.0060)"</li>
                     <li><strong>"Plan a trip to New York"</strong> - <em>Try this to see elicitation!</em></li>
+                    <li><strong>"Analyze weather patterns for New York, Los Angeles, Chicago"</strong> - <em>Try this to see sampling!</em></li>
                   </ul>
                 </div>
               </div>
@@ -787,6 +839,66 @@ function App() {
                 onClick={handleElicitationSubmit}
               >
                 Submit
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sampling Modal */}
+      {showSampling && samplingData && (
+        <div className="modal-overlay sampling-overlay">
+          <div className="modal sampling-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header sampling-header">
+              <h2>🔮 LLM Request from Server</h2>
+            </div>
+            
+            <div className="sampling-message">
+              <p>The MCP server is requesting your AI to generate a response.</p>
+              <p className="sampling-description">
+                <strong>This is MCP Sampling:</strong> The server needs AI assistance 
+                to process data or make decisions. Review the request below and 
+                approve if you want the AI to respond.
+              </p>
+            </div>
+            
+            <div className="sampling-details">
+              {samplingData.system_prompt && (
+                <div className="sampling-section">
+                  <label>System Prompt:</label>
+                  <pre>{samplingData.system_prompt}</pre>
+                </div>
+              )}
+              
+              <div className="sampling-section">
+                <label>Messages ({samplingData.messages.length}):</label>
+                <div className="sampling-messages">
+                  {samplingData.messages.map((msg, idx) => (
+                    <div key={idx} className={`sampling-msg ${msg.role}`}>
+                      <span className="msg-role">{msg.role}:</span>
+                      <pre>{msg.content}</pre>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              
+              <div className="sampling-section">
+                <label>Max Tokens: {samplingData.max_tokens}</label>
+              </div>
+            </div>
+            
+            <div className="sampling-actions">
+              <button 
+                className="btn btn-secondary" 
+                onClick={handleSamplingReject}
+              >
+                ❌ Reject
+              </button>
+              <button 
+                className="btn btn-primary" 
+                onClick={handleSamplingApprove}
+              >
+                ✅ Approve & Generate
               </button>
             </div>
           </div>

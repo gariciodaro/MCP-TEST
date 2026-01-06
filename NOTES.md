@@ -576,3 +576,341 @@ logging.basicConfig(
 3. **Async deadlocks are subtle** - trace the full call chain when debugging
 4. **WebSocket message loops** - be careful what blocks them
 5. **Read the actual API signatures** - parameter names matter (`schema` vs `response_type`)
+
+---
+
+# Sampling Implementation
+
+## Overview
+
+**Sampling** allows MCP servers to request LLM completions from the client. This is the reverse of the normal flow - instead of the client asking the LLM to call server tools, the server asks the client's LLM to process data.
+
+```
+Normal flow:  Client → LLM → Tool (on server)
+Sampling:     Server → Client → LLM → back to Server
+```
+
+## Why Sampling?
+
+1. **Server doesn't need its own API key** - uses client's LLM access
+2. **Data stays local** - server sends only what's needed for analysis
+3. **Human in the loop** - client can show user what server is asking
+4. **Consistent models** - same LLM for all operations
+
+## Implementation Structure
+
+### Server Side (MCP Server)
+
+```python
+from mcp.types import SamplingMessage, TextContent as MCPTextContent
+
+@mcp.tool()
+async def analyze_data(data: str, ctx: Context) -> str:
+    """Tool that uses sampling to request LLM assistance."""
+    
+    # Request client's LLM to analyze something
+    result = await ctx.session.create_message(
+        messages=[
+            SamplingMessage(
+                role="user",
+                content=MCPTextContent(
+                    type="text",
+                    text=f"Please analyze: {data}"
+                )
+            )
+        ],
+        max_tokens=500,
+        system_prompt="You are a helpful analyst."
+    )
+    
+    # Extract response
+    analysis = result.content
+    if hasattr(analysis, 'text'):
+        analysis = analysis.text
+    
+    return f"Analysis result: {analysis}"
+```
+
+### Client Side (MCP Client)
+
+The client provides a `sampling_callback` to the `ClientSession`:
+
+```python
+from mcp.types import CreateMessageRequestParams, CreateMessageResult, TextContent
+
+async def sampling_handler(context, params: CreateMessageRequestParams):
+    """Handle sampling request from MCP server."""
+    
+    # Show user what server is requesting (human in the loop)
+    approved = await get_user_approval(params.messages)
+    
+    if not approved:
+        return CreateMessageResult(
+            role="assistant",
+            content=TextContent(type="text", text="[Request rejected]"),
+            model="rejected",
+            stopReason="endTurn"
+        )
+    
+    # Make the actual LLM call
+    response = anthropic.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=params.maxTokens,
+        system=params.systemPrompt or "",
+        messages=[{"role": m.role, "content": m.content.text} for m in params.messages]
+    )
+    
+    return CreateMessageResult(
+        role="assistant",
+        content=TextContent(type="text", text=response.content[0].text),
+        model=response.model,
+        stopReason=response.stop_reason or "endTurn"
+    )
+
+# Pass to ClientSession
+session = ClientSession(read_stream, write_stream, sampling_callback=sampling_handler)
+```
+
+## WebSocket Protocol
+
+### Server → Client
+```json
+{
+    "type": "sampling_request",
+    "messages": [{"role": "user", "content": "Analyze this..."}],
+    "system_prompt": "You are a helpful analyst.",
+    "max_tokens": 500
+}
+```
+
+### Client → Server
+```json
+{
+    "type": "sampling_response",
+    "approved": true,
+    "response": null  // null = let client call LLM, or provide custom response
+}
+```
+
+Or to reject:
+```json
+{
+    "type": "sampling_response",
+    "approved": false
+}
+```
+
+## Key Types
+
+```python
+from mcp.types import (
+    SamplingMessage,
+    TextContent,
+    CreateMessageRequestParams,
+    CreateMessageResult,
+)
+
+# CreateMessageRequestParams contains:
+# - messages: list[SamplingMessage]
+# - systemPrompt: str | None
+# - maxTokens: int
+# - temperature: float | None
+# - modelPreferences: ModelPreferences | None
+
+# CreateMessageResult requires:
+# - role: "assistant"
+# - content: TextContent | ImageContent | AudioContent
+# - model: str  (model name or identifier)
+# - stopReason: str | None  (e.g., "endTurn", "maxTokens")
+```
+
+## Demo Tool: `analyze_weather_pattern`
+
+We created a tool that:
+1. Fetches weather data for multiple cities
+2. Uses sampling to ask client's LLM to analyze the patterns
+3. Returns combined raw data + AI analysis
+
+**Usage**: "Analyze weather patterns for New York, Los Angeles, Chicago"
+
+This demonstrates how a server can leverage client AI for complex analysis without needing its own LLM access.
+
+---
+
+# Troubleshooting: Sampling (Human-in-the-Loop) Issues
+
+This section documents issues we encountered implementing MCP sampling support.
+
+---
+
+## Issue 7: "Sampling not supported" Error
+
+**Error:**
+```
+⚠️ AI Analysis Unavailable:
+Sampling request failed: Sampling not supported
+```
+
+**Symptoms:** The server's `ctx.session.create_message()` call fails immediately with "Sampling not supported", even though we configured a sampling callback.
+
+### Root Cause 1: Missing `sampling_capabilities` Parameter
+
+The `ClientSession` requires BOTH a callback AND capabilities to advertise sampling support:
+
+```python
+# Wrong - only callback, no capabilities
+session = ClientSession(
+    read_stream, 
+    write_stream, 
+    sampling_callback=my_handler
+)
+
+# Correct - both callback AND capabilities
+from mcp.types import SamplingCapability
+
+session = ClientSession(
+    read_stream, 
+    write_stream, 
+    sampling_callback=my_handler,
+    sampling_capabilities=SamplingCapability()  # REQUIRED!
+)
+```
+
+**Why?** During initialization, the client sends its capabilities to the server. The MCP library checks:
+```python
+sampling = (
+    (self._sampling_capabilities or SamplingCapability())
+    if self._sampling_callback is not _default_sampling_callback
+    else None
+)
+```
+
+Without `sampling_capabilities`, the server doesn't know the client supports sampling.
+
+### Root Cause 2: FastMCPClient Used Without Sampling Handler (CRITICAL!)
+
+**This was the actual bug in our code.**
+
+When tools need elicitation support, we create a NEW `FastMCPClient` instance:
+
+```python
+# This creates a SEPARATE connection to the server!
+async with FastMCPClient(
+    self.server_path,
+    elicitation_handler=elicitation_handler
+) as client:
+    result = await client.call_tool(name, arguments)
+```
+
+**Problem:** This new client doesn't have our sampling callback! When the tool calls `ctx.session.create_message()`, the request goes to this new FastMCPClient which has no sampling handler - so it returns "Sampling not supported".
+
+**Solution:** Pass sampling handler to FastMCPClient too:
+
+```python
+async def sampling_handler(messages, params, ctx):
+    """Bridge between FastMCP sampling and our callback."""
+    # Convert messages and call our sampling callback
+    # Make LLM call if approved
+    # Return result string (FastMCP converts to CreateMessageResult)
+    ...
+
+async with FastMCPClient(
+    self.server_path,
+    elicitation_handler=elicitation_handler,
+    sampling_handler=sampling_handler,          # ADD THIS
+    sampling_capabilities=SamplingCapability()  # AND THIS
+) as client:
+    result = await client.call_tool(name, arguments)
+```
+
+**Key Insight:** FastMCPClient has a simpler sampling handler signature than raw ClientSession:
+```python
+# FastMCPClient sampling handler - can return just a string!
+SamplingHandler = Callable[
+    [list[SamplingMessage], SamplingParams, RequestContext],
+    str | CreateMessageResult | Awaitable[...]
+]
+
+# vs ClientSession - must return CreateMessageResult
+```
+
+---
+
+## Issue 8: Debugging MCP Server Subprocess
+
+**Problem:** `print()` statements in the MCP server (weather.py) don't appear in uvicorn logs.
+
+**Cause:** MCP servers run as subprocesses with stdout used for MCP protocol communication. `print()` would corrupt the protocol!
+
+**Wrong approach:**
+```python
+# This breaks MCP protocol!
+print("Debug message")
+
+# This also doesn't work - stderr from subprocess isn't captured
+import sys
+print("Debug", file=sys.stderr)
+```
+
+**Solution:** Use Python logging (though it still won't appear in parent process logs):
+```python
+import logging
+logger = logging.getLogger(__name__)
+logger.warning("Debug message")  # Goes to subprocess stderr
+```
+
+**Better solution:** Add debug logging on the CLIENT side (mcp_client.py) where you can see the logs:
+```python
+logger.info(f"Sampling callback configured: {sampling_fn}")
+logger.info(f"Session sampling callback: {self.session._sampling_callback}")
+```
+
+---
+
+## Issue 9: Understanding the Sampling Flow
+
+**The full sampling flow:**
+
+```
+1. User sends "Analyze weather for NYC"
+2. Claude decides to call analyze_weather_pattern tool
+3. MCPClient.call_tool() is invoked
+4. If elicitation available: creates FastMCPClient
+5. FastMCPClient connects to weather server (NEW SESSION!)
+6. Tool runs on server, calls ctx.session.create_message()
+7. Server sends CreateMessageRequest to client
+8. FastMCPClient's sampling_handler is called
+9. Handler shows UI / gets approval / calls LLM
+10. Result returns to server
+11. Tool completes, returns to FastMCPClient
+12. FastMCPClient returns to MCPClient
+13. Result goes back to Claude
+14. Claude formulates final response
+```
+
+**Key point:** Step 4-5 creates a NEW session! Any callbacks must be configured on THIS new client, not just the original MCPClient.session.
+
+---
+
+## Sampling vs Elicitation: Key Differences
+
+| Feature | Elicitation | Sampling |
+|---------|-------------|----------|
+| **Purpose** | Get user input | Get LLM response |
+| **Direction** | Server → User | Server → LLM |
+| **Human sees** | Form/questions | LLM request for approval |
+| **Returns** | User-provided data | LLM-generated text |
+| **Use case** | "What dates for your trip?" | "Analyze this weather data" |
+
+Both require WebSocket (not HTTP) because they happen mid-tool-execution.
+
+---
+
+## Debug Checklist for Sampling Issues
+
+1. ✅ Is `sampling_callback` passed to ClientSession?
+2. ✅ Is `sampling_capabilities=SamplingCapability()` passed?
+3. ✅ If using FastMCPClient for elicitation, does IT also have sampling handler?
+4. ✅ Check logs: "Sampling callback configured" should appear
+5. ✅ Check logs: "Sampling request received" should appear when tool runs
+6. ✅ Verify WebSocket connection (sampling needs real-time communication)

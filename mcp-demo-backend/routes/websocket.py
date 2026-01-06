@@ -1,8 +1,9 @@
 """
-WebSocket endpoint with elicitation support.
+WebSocket endpoint with elicitation and sampling support.
 
 This module handles real-time chat connections that support MCP's
-elicitation feature - allowing tools to request user input mid-execution.
+elicitation feature - allowing tools to request user input mid-execution,
+and sampling feature - allowing servers to request LLM assistance.
 """
 
 import asyncio
@@ -14,7 +15,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 logger = logging.getLogger(__name__)
 
 from config import get_api_key
-from mcp_client import MCPClient
+from mcp_client import MCPClient, SamplingRequest
 
 
 router = APIRouter()
@@ -35,11 +36,12 @@ class WebSocketSession:
     - MCP server connection
     - Chat message processing
     - Elicitation (pausing for user input mid-tool-execution)
+    - Sampling (server requesting LLM assistance from client)
     """
     
     def __init__(self, websocket: WebSocket, api_key: str):
         self.websocket = websocket
-        self.client = MCPClient(api_key)
+        self.client = MCPClient(api_key, sampling_callback=self.handle_sampling)
     
     async def send(self, data: dict) -> None:
         """Send JSON message to the client."""
@@ -95,6 +97,58 @@ class WebSocketSession:
                 
             except asyncio.TimeoutError:
                 # Just a periodic check, continue waiting
+                continue
+    
+    async def handle_sampling(self, request: SamplingRequest) -> tuple[bool, Optional[str]]:
+        """
+        Handle sampling request from MCP server.
+        
+        When a tool calls ctx.session.create_message(), this method:
+        1. Sends the request to the frontend for user approval
+        2. Waits for user to approve/reject
+        3. Returns whether approved and optional custom response
+        
+        This implements "human in the loop" for server LLM requests.
+        
+        Returns:
+            (approved: bool, response: Optional[str])
+            - If approved=True and response=None, MCPClient will call LLM
+            - If approved=True and response=str, that response is used
+            - If approved=False, request is rejected
+        """
+        await self.send({
+            "type": "sampling_request",
+            "messages": request.messages,
+            "system_prompt": request.system_prompt,
+            "max_tokens": request.max_tokens
+        })
+        
+        # Receive approval/rejection directly (same pattern as elicitation)
+        start_time = asyncio.get_event_loop().time()
+        timeout = 120  # 2 minutes
+        
+        while True:
+            elapsed = asyncio.get_event_loop().time() - start_time
+            if elapsed >= timeout:
+                logger.warning("Sampling request timed out waiting for approval")
+                return (False, None)
+            
+            try:
+                remaining = timeout - elapsed
+                data = await asyncio.wait_for(
+                    self.websocket.receive_json(),
+                    timeout=min(remaining, 30)
+                )
+                
+                logger.info(f"Sampling received message: {data}")
+                
+                if data.get("type") == "sampling_response":
+                    approved = data.get("approved", False)
+                    custom_response = data.get("response")  # Optional user-provided response
+                    return (approved, custom_response)
+                # Ignore other message types during sampling
+                
+            except asyncio.TimeoutError:
                 continue
     
     async def cleanup(self) -> None:
@@ -246,7 +300,7 @@ async def handle_messages(session: WebSocketSession) -> None:
 @router.websocket("/ws/chat")
 async def websocket_chat(websocket: WebSocket):
     """
-    WebSocket endpoint for chat with elicitation support.
+    WebSocket endpoint for chat with elicitation and sampling support.
     
     Protocol:
     
@@ -254,11 +308,13 @@ async def websocket_chat(websocket: WebSocket):
         {"type": "connect", "server_path": "path/to/server.py"}
         {"type": "chat", "message": "Hello"}
         {"type": "elicitation_response", "action": "accept", "data": {...}}
+        {"type": "sampling_response", "approved": true, "response": "optional custom response"}
         {"type": "disconnect"}
     
     Server -> Client:
         {"type": "connected", "tools": [...], "resources": [...], "prompts": [...]}
         {"type": "elicitation", "message": "...", "schema": {...}}
+        {"type": "sampling_request", "messages": [...], "system_prompt": "...", "max_tokens": 500}
         {"type": "response", "content": "...", "tool_calls": [...]}
         {"type": "error", "message": "..."}
     """
