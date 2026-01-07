@@ -79,6 +79,11 @@ async def get_forecast(latitude: float, longitude: float) -> str:
 
 **In the UI:** Ask a question → AI decides to use a tool → Tool executes → AI summarizes the result.
 
+### Example on Claude Desktop App
+
+![Prompts Demo Claude Desktop](imgs/tools-claude-desktop.png)
+
+-> **Note:** Claude Desktop does not support server features: Elicitation, Sampling.
 ---
 
 ## 2. Resources 📦
@@ -121,6 +126,7 @@ def weekly_planning(city: str) -> str:
 ```
 
 ![Prompts Demo](imgs/prompts.png)
+
 
 **In the UI:** Select a prompt → Fill in arguments → Preview → Use in chat.
 
@@ -168,6 +174,13 @@ async def plan_trip(destination: str, ctx: Context) -> str:
 **Why Elicitation matters:** Traditional tools are fire-and-forget. Elicitation enables tools that have a conversation with the user, gathering context as needed.
 
 ![Elicitation Demo](imgs/elicitation.png)
+
+
+### Example on Visual Studio Code
+
+![Elicitation vscode](imgs/elicitation-vscode.png)
+
+-> **Note:** vscode give all support to all MCP protocol features: eliciation, sampling (client side), resources, prompts, tools (server side) 
 
 ---
 

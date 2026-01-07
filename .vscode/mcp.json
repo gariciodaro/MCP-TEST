@@ -1,0 +1,11 @@
+{
+  "servers": {
+    "weather": {
+      "command": "/home/recall_space_developer/miniconda3/bin/conda",
+      "args": [
+        "run", "-n", "mcp", "--no-capture-output",
+        "python", "/home/recall_space_developer/Desktop/github/MCP-TEST/weather-mcp-server/weather.py"
+      ]
+    }
+  }
+}
